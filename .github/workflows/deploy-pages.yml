@@ -1,0 +1,66 @@
+name: Desplegar el frontend en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Si se empujan varios commits seguidos, sólo interesa desplegar el último.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Sin esta variable el paquete se construye con `undefined` como URL de la
+      # API y todas las peticiones fallan sin decir por qué. Mejor parar aquí.
+      - name: Comprobar que la URL de la API está configurada
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "Falta la variable de repositorio VITE_API_URL."
+            echo "Settings -> Secrets and variables -> Actions -> Variables."
+            echo "Debe apuntar al backend desplegado, por ejemplo https://mi-backend/api"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          # GitHub Pages sirve el proyecto bajo /<nombre-del-repo>/
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

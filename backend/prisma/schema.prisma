@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  
+}
+
+model Admin {
+  id            String   @id @default(uuid()) @db.Uuid
+  full_name     String   @db.VarChar(100)
+  email         String   @unique @db.VarChar(150)
+  password_hash String
+  role          String   @default("admin") @db.VarChar(20) // super_admin | admin
+  created_at    DateTime @default(now()) @db.Timestamptz()
+
+  events        Event[]      // eventos que creó
+  assignments   EventAdmin[] // eventos que tiene asignados
+}
+
+// Qué administradores gestionan qué eventos. Un super admin no necesita filas
+// aquí: ve todos los eventos por su rol.
+model EventAdmin {
+  event_id    String   @db.Uuid
+  admin_id    String   @db.Uuid
+  event       Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  admin       Admin    @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  assigned_at DateTime @default(now()) @db.Timestamptz()
+
+  @@id([event_id, admin_id])
+  @@index([admin_id])
+}
+
+model Event {
+  id               String   @id @default(uuid()) @db.Uuid
+  admin_id         String   @db.Uuid
+  admin            Admin    @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  name             String   @db.VarChar(200)
+  description      String?  @db.Text
+  start_date       DateTime @db.Date
+  end_date         DateTime @db.Date
+  entry_start      String   @db.VarChar(5) // Guardaremos el formato "HH:MM" (ej: "09:00")
+  entry_end        String   @db.VarChar(5)
+  timezone         String   @default("UTC") @db.VarChar(64) // IANA, ej "America/Mexico_City": la ventana de ingreso se evalúa en esta zona
+  staff_password   String
+  qr_config        Json?    @default("{}")
+  created_at       DateTime @default(now()) @db.Timestamptz()
+  
+  guests           Guest[]
+  access_logs      AccessLog[]
+  assignments      EventAdmin[]
+}
+
+model Guest {
+  id          String   @id @default(uuid()) @db.Uuid
+  event_id    String   @db.Uuid
+  event       Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  name        String   @db.VarChar(200)
+  // Opcional: hay invitados de los que sólo se tiene el nombre. Sin correo no se
+  // les puede enviar el QR, pero sí descargarlo e imprimirlo.
+  email       String?  @db.VarChar(150)
+  department  String?  @db.VarChar(120)
+  // Personas que entran con esta invitación, el titular incluido.
+  party_size  Int      @default(1)
+  // Nombres de los acompañantes, cuando se conocen. Pueden ser menos que
+  // party_size - 1 si aún no se saben todos.
+  companions  String[] @default([])
+  qr_token    String   @unique @default(uuid()) @db.Uuid
+  status      String   @default("pending") @db.VarChar(20)
+  qr_sent_at  DateTime? @db.Timestamptz() // Última vez que se le envió el QR por correo
+
+  access_logs AccessLog[]
+
+  @@unique([event_id, email]) // Un mismo correo no puede registrarse dos veces al mismo evento
+}
+
+model AccessLog {
+  id          BigInt   @id @default(autoincrement())
+  event_id    String   @db.Uuid
+  event       Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  guest_id    String?  @db.Uuid
+  guest       Guest?   @relation(fields: [guest_id], references: [id], onDelete: SetNull)
+  scanned_at  DateTime @default(now()) @db.Timestamptz()
+  result      String   @db.VarChar(50)
+  device_info String?  @db.Text
+
+  @@index([event_id])
+}
